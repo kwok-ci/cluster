@@ -1,0 +1,61 @@
+name: Build kwok cluster
+run-name: Build kwok ${{ github.event.inputs.kwok-tag }} cluster ${{ github.event.inputs.tag }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag: 
+        description: 'tag'
+        required: true
+        type: string
+
+      kwok-tag: 
+        description: 'kwok-tag'
+        required: true
+        type: string
+
+env:
+  GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      packages: write
+    env:
+      KWOK_KUBE_VERSION: "${{ github.event.inputs.tag }}"
+      KWOK_VERSION: "${{ github.event.inputs.kwok-tag }}"
+    steps:
+      - name: Checkout kwok
+        run: |        
+          wget -q "https://github.com/kubernetes-sigs/kwok/archive/refs/tags/${KWOK_VERSION}.tar.gz" -O - | tar xz
+          mv kwok-${KWOK_VERSION#v}/* ./
+          mkdir -p ./bin/linux/amd64/
+          mkdir -p ./bin/linux/arm64/
+          wget -q "https://github.com/kubernetes-sigs/kwok/releases/download/${KWOK_VERSION}/kwok-linux-amd64" -O ./bin/linux/amd64/kwok
+          wget -q "https://github.com/kubernetes-sigs/kwok/releases/download/${KWOK_VERSION}/kwok-linux-arm64" -O ./bin/linux/arm64/kwok
+          wget -q "https://github.com/kubernetes-sigs/kwok/releases/download/${KWOK_VERSION}/kwokctl-linux-amd64" -O ./bin/linux/amd64/kwokctl
+          wget -q "https://github.com/kubernetes-sigs/kwok/releases/download/${KWOK_VERSION}/kwokctl-linux-arm64" -O ./bin/linux/arm64/kwokctl
+
+      - name: Log into registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ env.GH_TOKEN }}
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build cluster image
+        env:
+          IMAGE: ghcr.io/${{ github.repository }}
+        run: |
+          ./images/cluster/build.sh \
+            --platform=linux/amd64 \
+            --platform=linux/arm64 \
+            --kube-version=${KWOK_KUBE_VERSION} \
+            --image=${IMAGE} \
+            --version=${KWOK_VERSION} \
+            --push=true
